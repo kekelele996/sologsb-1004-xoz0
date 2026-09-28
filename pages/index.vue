@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DeviceKind, DiffLine, LanguageDraft, ScriptStatus, Segment } from '~/types'
+import type { DeviceKind, DiffLine, HallIntroReferenceRow, LanguageDraft, ScriptStatus, Segment } from '~/types'
 import { LANGUAGES, useScriptStore } from '~/stores/script'
 
 const store = useScriptStore()
@@ -38,6 +38,46 @@ const diffLines = computed<DiffLine[]>(() => {
   const before = selectedVersionA.value?.draft.narration || ''
   const after = selectedVersionB.value?.draft.narration || ''
   return buildDiff(before, after)
+})
+
+// 展厅导语：当前展厅、当前语言（导语页可独立切换语言，与左下角语言选择保持同步）
+const introLanguage = ref(store.selectedLanguageId)
+watch(() => store.selectedLanguageId, value => { introLanguage.value = value })
+watch(introLanguage, value => { if (value) store.selectLanguage(value) })
+const hallIntro = computed(() => store.selectedHall ? store.hallIntro(store.selectedHall.id, store.selectedLanguageId) : undefined)
+// 导语先在本地缓冲，失焦后一次性提交，避免逐字产生撤销记录与误报待复核
+const introDraft = ref('')
+watch([() => store.selectedHallId, () => store.selectedLanguageId, hallIntro], () => {
+  introDraft.value = hallIntro.value?.content || ''
+}, { immediate: true })
+function saveHallIntro(event: Event) {
+  const value = (event.target as HTMLTextAreaElement).value
+  if (store.selectedHall && value !== (hallIntro.value?.content || '')) {
+    store.updateHallIntro(store.selectedHall.id, store.selectedLanguageId, value)
+  }
+}
+const introReferences = computed<HallIntroReferenceRow[]>(() =>
+  store.selectedHall ? store.hallIntroReferences(store.selectedHall.id, store.selectedLanguageId) : [])
+const staleIntroCount = computed(() => introReferences.value.filter(row => row.stale).length)
+
+function segmentStale(segment: Segment): boolean {
+  return store.selectedHall ? store.isSegmentStale(segment, store.selectedHall.id, store.selectedLanguageId) : false
+}
+function segmentFullText(segment: Segment): string {
+  return store.selectedHall ? store.segmentFullText(segment, store.selectedHall.id, store.selectedLanguageId) : segment.content
+}
+const noticeFocus = ref('')
+function locateSegment(row: HallIntroReferenceRow) {
+  store.selectExhibit(row.exhibitId)
+  activeTab.value = 'editor'
+  noticeFocus.value = row.segmentId
+}
+watch(noticeFocus, id => {
+  if (!id) return
+  window.setTimeout(() => {
+    document.getElementById(`segment-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    noticeFocus.value = ''
+  }, 120)
 })
 
 onMounted(() => {
@@ -195,14 +235,14 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
 
         <v-tabs v-model="activeTab" color="primary" bg-color="surface" rounded="lg" class="mb-4 px-2">
           <v-tab value="editor">脚本编辑</v-tab>
+          <v-tab value="hall-intro">展厅导语</v-tab>
           <v-tab value="versions">版本比较</v-tab>
           <v-tab value="preview">设备预览</v-tab>
           <v-tab value="sources">资料核对</v-tab>
         </v-tabs>
 
-        <div v-if="draft">
-          <v-window v-model="activeTab" :touch="false">
-            <v-window-item value="editor">
+        <v-window v-model="activeTab" :touch="false">
+          <v-window-item v-if="draft" value="editor">
               <v-row>
                 <v-col cols="12" lg="8">
                   <v-card class="script-card pa-4 pa-md-6">
@@ -252,16 +292,71 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
                       <v-chip variant="tonal">{{ draft.segments.filter(item => item.locked).length }}/{{ draft.segments.length }} 已锁定</v-chip>
                     </div>
                     <div class="d-flex flex-column ga-3">
-                      <div v-for="(segment, index) in draft.segments" :key="segment.id" class="segment-row" :class="{ locked: segment.locked }">
-                        <div class="d-flex align-center ga-2">
+                      <div v-for="(segment, index) in draft.segments" :key="segment.id" :id="`segment-${segment.id}`" class="segment-row" :class="{ locked: segment.locked, stale: segmentStale(segment) }">
+                        <div class="d-flex align-center ga-2 flex-wrap">
                           <v-btn icon size="small" variant="text" :aria-label="segment.locked ? '解锁段落' : '锁定段落'" @click="store.toggleLock(segment.id)">
                             {{ segment.locked ? '🔒' : '🔓' }}
                           </v-btn>
                           <v-text-field :model-value="segment.label" density="compact" hide-details variant="plain" :readonly="segment.locked" :aria-label="`第 ${index + 1} 段标题`" @change="saveSegment(segment.id, 'label', $event)" />
+                          <v-chip v-if="segment.hallIntroRef" color="secondary" size="small" variant="tonal" prepend-icon="mdi-link-variant">引用导语</v-chip>
+                          <v-chip v-if="segmentStale(segment)" color="warning" size="small" variant="tonal" prepend-icon="mdi-alert-circle-outline">待复核</v-chip>
+                          <v-chip v-else-if="segment.hallIntroRef" color="success" size="small" variant="tonal" prepend-icon="mdi-check-circle-outline">已同步</v-chip>
                           <v-chip v-if="segment.locked" color="success" size="small" variant="tonal">已确认</v-chip>
+                          <v-spacer />
+                          <v-btn
+                            size="x-small"
+                            variant="text"
+                            :disabled="segment.locked"
+                            :prepend-icon="segment.hallIntroRef ? 'mdi-link-off' : 'mdi-link-variant-plus'"
+                            :aria-label="segment.hallIntroRef ? '取消引用展厅导语' : '引用展厅导语'"
+                            @click="store.setSegmentReference(segment.id, !segment.hallIntroRef)"
+                          >{{ segment.hallIntroRef ? '取消引用' : '引用导语' }}</v-btn>
                           <v-btn icon="mdi-delete-outline" size="small" variant="text" color="error" :disabled="segment.locked" :aria-label="`删除第 ${index + 1} 段`" @click="deleteTarget = segment.id" />
                         </div>
-                        <v-textarea class="mt-2" :model-value="segment.content" rows="2" auto-grow hide-details :readonly="segment.locked" :aria-label="segmentLabel(segment)" @change="saveSegment(segment.id, 'content', $event)" />
+
+                        <v-alert
+                          v-if="segment.hallIntroRef && segmentStale(segment)"
+                          type="warning"
+                          variant="tonal"
+                          density="compact"
+                          class="mt-3"
+                        >
+                          <div class="d-flex flex-wrap align-center ga-2">
+                            <span>展厅导语已更新，{{ segment.locked ? '请先解锁段落再确认；确认前仍使用旧导语。' : '确认前本段落仍使用旧导语。' }}</span>
+                            <v-spacer />
+                            <v-btn v-if="segment.locked" size="x-small" variant="text" @click="store.toggleLock(segment.id)">解锁</v-btn>
+                            <v-btn v-else size="x-small" variant="outlined" @click="store.confirmSegmentIntro(segment.id)">采用新导语</v-btn>
+                          </div>
+                        </v-alert>
+
+                        <template v-if="segment.hallIntroRef">
+                          <div class="intro-block mt-3" :class="segmentStale(segment) ? 'intro-old' : 'intro-current'">
+                            <div class="intro-tag">{{ segmentStale(segment) ? '当前使用 · 旧导语' : '展厅导语（只读）' }}</div>
+                            <p class="intro-text">{{ segment.hallIntroRef.introSnapshot }}</p>
+                          </div>
+                          <v-textarea
+                            class="mt-2"
+                            :model-value="segment.content"
+                            :label="`接在导语后的本展项内容 · 第 ${index + 1} 段`"
+                            rows="2"
+                            auto-grow
+                            hide-details
+                            :readonly="segment.locked"
+                            :aria-label="segmentLabel(segment)"
+                            @change="saveSegment(segment.id, 'content', $event)"
+                          />
+                        </template>
+                        <v-textarea
+                          v-else
+                          class="mt-2"
+                          :model-value="segment.content"
+                          rows="2"
+                          auto-grow
+                          hide-details
+                          :readonly="segment.locked"
+                          :aria-label="segmentLabel(segment)"
+                          @change="saveSegment(segment.id, 'content', $event)"
+                        />
                       </div>
                     </div>
                   </v-card>
@@ -298,7 +393,7 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
               </v-row>
             </v-window-item>
 
-            <v-window-item value="versions">
+            <v-window-item v-if="draft" value="versions">
               <v-card class="script-card pa-4 pa-md-6">
                 <div class="d-flex flex-wrap align-center justify-space-between ga-3 mb-5">
                   <div>
@@ -330,7 +425,7 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
               </v-card>
             </v-window-item>
 
-            <v-window-item value="preview">
+            <v-window-item v-if="draft" value="preview">
               <v-card class="script-card pa-4 pa-md-6">
                 <div class="d-flex flex-wrap align-center justify-space-between ga-3 mb-5">
                   <div>
@@ -346,6 +441,14 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
                     <div class="text-overline text-medium-emphasis">{{ exhibit?.code }} · {{ currentLanguage?.label }}</div>
                     <h2 class="text-h4 font-weight-bold mt-2">{{ draft.title }}</h2>
                     <p class="text-body-1 mt-6" style="line-height:1.9;white-space:pre-wrap">{{ draft.narration }}</p>
+                    <template v-if="draft.segments.length">
+                      <v-divider class="my-6" />
+                      <div class="section-title">分段讲解</div>
+                      <div v-for="segment in draft.segments" :key="segment.id" class="mt-3">
+                        <div class="text-caption text-medium-emphasis">{{ segment.label }}</div>
+                        <p class="text-body-2 mt-1" style="line-height:1.8;white-space:pre-wrap">{{ segmentFullText(segment) }}</p>
+                      </div>
+                    </template>
                     <v-divider class="my-6" />
                     <div class="section-title">无障碍描述</div>
                     <p class="text-body-2 mt-2" style="line-height:1.8;white-space:pre-wrap">{{ draft.accessibility }}</p>
@@ -355,7 +458,7 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
               </v-card>
             </v-window-item>
 
-            <v-window-item value="sources">
+            <v-window-item v-if="draft" value="sources">
               <v-row>
                 <v-col cols="12" md="7">
                   <v-card class="script-card pa-5">
@@ -377,9 +480,76 @@ function segmentLabel(segment: Segment) { return segment.label || '未命名段�
                 </v-col>
               </v-row>
             </v-window-item>
+
+            <v-window-item value="hall-intro">
+              <v-row>
+                <v-col cols="12" md="6">
+                  <v-card class="script-card pa-4 pa-md-6">
+                    <div class="d-flex flex-wrap align-center justify-space-between ga-3 mb-4">
+                      <div>
+                        <div class="section-title">展厅公共导语</div>
+                        <div class="text-h6 font-weight-bold mt-1">{{ store.selectedHall?.name }} · {{ currentLanguage?.label }}</div>
+                      </div>
+                      <v-btn-toggle v-model="introLanguage" mandatory variant="outlined" divided density="compact">
+                        <v-btn v-for="lang in LANGUAGES" :key="lang.id" :value="lang.id" :aria-label="`用 ${lang.label} 编辑导语`">{{ lang.shortLabel }}</v-btn>
+                      </v-btn-toggle>
+                    </div>
+                    <v-alert type="info" variant="tonal" density="compact" class="mb-3">
+                      导语按展厅、按语言分别维护。展项段落可引用它，再补写本展项内容；导语改动后，引用段落需确认复核才会换成新文案。
+                    </v-alert>
+                    <v-textarea
+                      :model-value="introDraft"
+                      :label="`${currentLanguage?.label || ''}导语`"
+                      rows="8"
+                      auto-grow
+                      hint="失焦后自动保存；保存后引用此导语的段落进入待复核。"
+                      persistent-hint
+                      @change="saveHallIntro($event)"
+                    />
+                    <div class="text-caption text-medium-emphasis mt-2">
+                      {{ hallIntro?.updatedAt ? `导语最后更新 ${formatTime(hallIntro.updatedAt)}` : '该语言尚未填写导语' }}
+                    </div>
+                  </v-card>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-card class="script-card pa-4 pa-md-6">
+                    <div class="d-flex align-center justify-space-between mb-3">
+                      <div>
+                        <div class="section-title">引用情况</div>
+                        <div class="text-body-2 text-medium-emphasis mt-1">{{ introReferences.length }} 个展项段落引用了本导语</div>
+                      </div>
+                      <v-chip v-if="staleIntroCount" color="warning" variant="tonal" size="small">{{ staleIntroCount }} 段待复核</v-chip>
+                      <v-chip v-else color="success" variant="tonal" size="small">全部已同步</v-chip>
+                    </div>
+                    <v-alert v-if="staleIntroCount" type="warning" variant="tonal" density="compact" class="mb-3">
+                      展厅导语已更新，以下 {{ staleIntroCount }} 个段落确认前仍向观众显示旧导语。
+                    </v-alert>
+                    <v-list v-if="introReferences.length" class="bg-transparent">
+                      <v-list-item
+                        v-for="row in introReferences"
+                        :key="`${row.exhibitId}-${row.segmentId}`"
+                        :title="row.label"
+                        :subtitle="`${row.code} ${row.exhibitTitle}`"
+                        rounded="lg"
+                      >
+                        <template #prepend>
+                          <v-icon :color="row.stale ? 'warning' : 'success'">{{ row.stale ? 'mdi-alert-circle-outline' : 'mdi-check-circle-outline' }}</v-icon>
+                        </template>
+                        <template #append>
+                          <v-chip :color="row.stale ? 'warning' : 'success'" variant="tonal" size="small" class="me-2">
+                            {{ row.stale ? '待复核' : '已同步' }}
+                          </v-chip>
+                          <v-btn variant="text" size="small" @click="locateSegment(row)">查看</v-btn>
+                        </template>
+                      </v-list-item>
+                    </v-list>
+                    <v-empty-state v-else icon="mdi-link-variant-off" title="暂无段落引用" text="在脚本编辑的分段校对中，可为段落选择“引用展厅导语”。" />
+                  </v-card>
+                </v-col>
+              </v-row>
+            </v-window-item>
           </v-window>
-        </div>
-        <v-empty-state v-else icon="mdi-script-text-outline" title="尚未选择展项" text="请从左侧选择一个展厅和展项。" />
+        <v-empty-state v-if="!draft && activeTab === 'editor'" icon="mdi-script-text-outline" title="尚未选择展项" text="请从左侧选择一个展厅和展项；也可先在“展厅导语”页维护公共导语。" />
       </div>
     </v-main>
 
