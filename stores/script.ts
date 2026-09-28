@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Exhibit, Hall, Language, LanguageDraft, PersistedState, ScriptStatus, Segment, VersionSnapshot } from '~/types'
+import type { Exhibit, Hall, HallIntro, IntroRef, IntroState, IntroUsage, Language, LanguageDraft, PersistedState, ScriptStatus, Segment, VersionSnapshot } from '~/types'
 
 export const LANGUAGES: Language[] = [
   { id: 'zh', code: 'zh-CN', label: '简体中文', shortLabel: '中' },
@@ -9,18 +9,44 @@ export const LANGUAGES: Language[] = [
 
 const STORAGE_KEY = 'museum-script-studio-v1'
 
-const segments = (prefix: string, values: Array<[string, string, boolean?]>): Segment[] => values.map(([label, content, locked], index) => ({
+const segments = (
+  prefix: string,
+  values: Array<[string, string, boolean?, IntroRef?]>
+): Segment[] => values.map(([label, content, locked, introRef], index) => ({
   id: `${prefix}-${index + 1}`,
   label,
   content,
-  locked: Boolean(locked)
+  locked: Boolean(locked),
+  ...(introRef ? { introRef } : {})
 }))
 
+function intro(languageId: string, content: string, updatedAt: string): HallIntro {
+  return { languageId, content, updatedAt }
+}
+
+function introRef(languageId: string, syncedContent: string, pending: boolean, updatedAt: string): IntroRef {
+  return { languageId, pending, syncedContent, updatedAt }
+}
+
 function demoState(): PersistedState {
+  const hallAncientIntroZh = '从聚落到王朝，这片土地上的先民以玉、陶、青铜记录信仰与秩序。请放慢脚步，透过器物聆听五千年前的回响。'
+  const hallAncientIntroZhOld = '这里陈列史前至先秦的重要文物，展现中国早期文明的发展脉络。'
   const halls: Hall[] = [
-    { id: 'hall-ancient', name: '文明肇始厅', description: '史前至先秦文明，共 18 个展项' },
-    { id: 'hall-silk', name: '丝路交融厅', description: '丝绸之路上的器物、信仰与生活' },
-    { id: 'hall-city', name: '城市记忆厅', description: '近现代城市空间与市民生活' }
+    {
+      id: 'hall-ancient', name: '文明肇始厅', description: '史前至先秦文明，共 18 个展项',
+      intros: [
+        intro('zh', hallAncientIntroZh, '2026-09-27T09:00:00.000Z'),
+        intro('en', 'From settlements to dynasties, jade, pottery and bronze record early beliefs and ritual order.', '2026-09-26T07:30:00.000Z'),
+        intro('ja', '集落から王朝へ。玉や青銅器に、五千年の信仰と秩序を読み取ります。', '2026-09-25T07:30:00.000Z')
+      ]
+    },
+    {
+      id: 'hall-silk', name: '丝路交融厅', description: '丝绸之路上的器物、信仰与生活',
+      intros: [
+        intro('zh', '丝绸之路把器物、纹样与信仰带到远方。本厅邀您从一匹丝绸出发，重看东西交流的日常。', '2026-09-24T03:00:00.000Z')
+      ]
+    },
+    { id: 'hall-city', name: '城市记忆厅', description: '近现代城市空间与市民生活', intros: [] }
   ]
   const exhibits: Exhibit[] = [
     {
@@ -33,7 +59,7 @@ function demoState(): PersistedState {
           durationMinutes: 2.5, sources: '《中国玉器全集》第一卷；本馆藏品档案 1987-J-042',
           status: 'approved', updatedAt: '2026-09-23T08:35:00.000Z',
           segments: segments('jade-zh', [
-            ['开场定位', '这件玉琮来自距今约五千年的良渚文化。', true],
+            ['开场定位', '', false, introRef('zh', hallAncientIntroZhOld, true, '2026-09-23T08:35:00.000Z')],
             ['器物观察', '它外方内圆，四角雕刻神人兽面纹。', true],
             ['文化含义', '玉琮常被看作沟通天地的礼器，也象征权力与身份。'],
             ['参观提示', '请沿展柜顺时针观察，触摸复制品前先使用免洗消毒液。']
@@ -46,7 +72,7 @@ function demoState(): PersistedState {
           durationMinutes: 2.3, sources: 'Complete Collection of Chinese Jades, Vol. 1; Museum accession 1987-J-042',
           status: 'review', updatedAt: '2026-09-24T02:15:00.000Z',
           segments: segments('jade-en', [
-            ['Introduction', 'This jade cong is about five thousand years old.', true],
+            ['Introduction', '', false, introRef('en', 'From settlements to dynasties, jade, pottery and bronze record early beliefs and ritual order.', false, '2026-09-26T07:30:00.000Z')],
             ['Visual description', 'Its square body encloses a circular opening, while spirit-and-animal motifs cover the corners.'],
             ['Meaning', 'Jade cong is understood as a ritual link between heaven and earth.']
           ])
@@ -99,7 +125,10 @@ function demoState(): PersistedState {
         accessibility: '体验区提供放大纹样、凸点经纬结构以及可操作的小型织机模型。',
         durationMinutes: 4, sources: '馆内教育活动资料；丝绸之路纺织史专题',
         status: 'draft', updatedAt: '2026-09-20T03:00:00.000Z',
-        segments: segments('silk-zh', [['序言', '丝绸不只是一种材料，也是交流的媒介。'], ['互动', '请试着推动梭子，观察经纬线如何交会。']])
+        segments: segments('silk-zh', [
+          ['序言', '', false, introRef('zh', '丝绸之路把器物、纹样与信仰带到远方。本厅邀您从一匹丝绸出发，重看东西交流的日常。', false, '2026-09-24T03:00:00.000Z')],
+          ['本展项看点', '请试着推动梭子，观察经纬线如何交会。']
+        ])
       }]
     }
   ]
@@ -112,6 +141,32 @@ function demoState(): PersistedState {
     selectedLanguageId: 'zh',
     lastSavedAt: new Date().toISOString()
   }
+}
+
+/** 旧版本地数据迁移：为展厅补齐按语言维护的导语集合 */
+function migrate(data: PersistedState): PersistedState {
+  data.halls = (data.halls || []).map(hall => ({
+    ...hall,
+    intros: Array.isArray(hall.intros) ? hall.intros : []
+  }))
+  data.exhibits = (data.exhibits || []).map(exhibit => ({
+    ...exhibit,
+    drafts: exhibit.drafts.map(draft => ({
+      ...draft,
+      segments: draft.segments.map(segment => ({
+        ...segment,
+        introRef: segment.introRef
+          ? {
+              languageId: segment.introRef.languageId || draft.languageId,
+              pending: Boolean(segment.introRef.pending),
+              syncedContent: segment.introRef.syncedContent ?? '',
+              updatedAt: segment.introRef.updatedAt || draft.updatedAt
+            }
+          : undefined
+      }))
+    }))
+  }))
+  return data
 }
 
 export const useScriptStore = defineStore('museum-script', {
@@ -153,7 +208,7 @@ export const useScriptStore = defineStore('museum-script', {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved) {
         try {
-          const data = JSON.parse(saved) as PersistedState
+          const data = migrate(JSON.parse(saved) as PersistedState)
           this.$patch({ ...data, hydrated: true })
           if (!this.halls.length || !this.exhibits.length) this.resetDemo()
         } catch {
@@ -213,6 +268,150 @@ export const useScriptStore = defineStore('museum-script', {
       this.selectedLanguageId = id
       this.persist()
     },
+    // ---- 展厅公共导语（按语言） ----
+    findHallIntro(hallId: string, languageId: string): HallIntro | undefined {
+      return this.halls.find(hall => hall.id === hallId)?.intros.find(item => item.languageId === languageId)
+    },
+    hallIntroContent(hallId: string, languageId: string): string {
+      return this.findHallIntro(hallId, languageId)?.content ?? ''
+    },
+    /** 保存某展厅、某语言的导语；内容变化后所有引用段落转为待复核，确认前保留旧导语 */
+    updateHallIntro(hallId: string, languageId: string, content: string) {
+      const hall = this.halls.find(item => item.id === hallId)
+      if (!hall) return
+      const existing = hall.intros.find(item => item.languageId === languageId)
+      if (existing && existing.content === content) return
+      let pendingCount = 0
+      this.commit(() => {
+        const now = new Date().toISOString()
+        if (existing) {
+          existing.content = content
+          existing.updatedAt = now
+        } else {
+          hall.intros.push({ languageId, content, updatedAt: now })
+        }
+        for (const exhibit of this.exhibits.filter(item => item.hallId === hallId)) {
+          for (const draft of exhibit.drafts.filter(item => item.languageId === languageId)) {
+            for (const segment of draft.segments) {
+              if (segment.introRef && !segment.introRef.pending) {
+                segment.introRef.pending = true
+                pendingCount++
+              }
+            }
+          }
+        }
+      })
+      this.notice = pendingCount
+        ? `导语已保存，${pendingCount} 个引用段落标记为待复核，确认前仍使用旧导语。`
+        : '导语已保存到浏览器。'
+    },
+    /** 引用当前语言的展厅导语；本展项补写内容保留在 segment.content */
+    attachIntroRef(exhibitId: string, languageId: string, segmentId: string) {
+      const exhibit = this.exhibits.find(item => item.id === exhibitId)
+      const draft = exhibit?.drafts.find(item => item.languageId === languageId)
+      const segment = draft?.segments.find(item => item.id === segmentId)
+      const hallIntro = this.findHallIntro(exhibit?.hallId || '', languageId)
+      if (!exhibit || !segment || segment.locked || segment.introRef) return
+      if (!hallIntro || !hallIntro.content.trim()) {
+        this.notice = '当前展厅还没有这一语言的导语，请先在“展厅导语”中撰写。'
+        return
+      }
+      const now = new Date().toISOString()
+      this.commit(() => {
+        segment.introRef = { languageId, pending: false, syncedContent: hallIntro.content, updatedAt: now }
+      })
+      this.notice = '已引用展厅导语，可在下方补写本展项内容。'
+    },
+    /** 取消引用：导语文本并入段落正文，恢复成可自由编辑的普通段落 */
+    detachIntroRef(exhibitId: string, languageId: string, segmentId: string) {
+      const exhibit = this.exhibits.find(item => item.id === exhibitId)
+      const draft = exhibit?.drafts.find(item => item.languageId === languageId)
+      const segment = draft?.segments.find(item => item.id === segmentId)
+      if (!segment || segment.locked || !segment.introRef) return
+      const rendered = this.paragraphOf(segment, languageId)
+      this.commit(() => {
+        segment.content = rendered
+        segment.introRef = undefined
+      })
+      this.notice = '已取消引用，原导语文本保留在段落中，可自由编辑。'
+    },
+    /** 确认采用新导语 */
+    acceptIntroRef(exhibitId: string, languageId: string, segmentId: string) {
+      const exhibit = this.exhibits.find(item => item.id === exhibitId)
+      const draft = exhibit?.drafts.find(item => item.languageId === languageId)
+      const segment = draft?.segments.find(item => item.id === segmentId)
+      const hallIntro = this.findHallIntro(exhibit?.hallId || '', languageId)
+      if (!segment || segment.locked || !segment.introRef || !segment.introRef.pending || !hallIntro) return
+      this.commit(() => {
+        segment.introRef!.syncedContent = hallIntro.content
+        segment.introRef!.pending = false
+        segment.introRef!.updatedAt = new Date().toISOString()
+      })
+      this.notice = '已确认采用新导语。'
+    },
+    /** 一次性确认本展厅、本语言下所有未锁定的待复核段落 */
+    acceptAllHallIntros(hallId: string, languageId: string) {
+      const hallIntro = this.findHallIntro(hallId, languageId)
+      if (!hallIntro) return
+      let count = 0
+      this.commit(() => {
+        const now = new Date().toISOString()
+        for (const exhibit of this.exhibits.filter(item => item.hallId === hallId)) {
+          for (const draft of exhibit.drafts.filter(item => item.languageId === languageId)) {
+            for (const segment of draft.segments) {
+              if (segment.introRef && segment.introRef.pending && !segment.locked) {
+                segment.introRef.syncedContent = hallIntro.content
+                segment.introRef.pending = false
+                segment.introRef.updatedAt = now
+                count++
+              }
+            }
+          }
+        }
+      })
+      this.notice = count ? `已确认 ${count} 个段落采用新导语。` : '没有待复核的段落。'
+    },
+    /** 段落引用状态：无引用 / 导语缺失 / 已同步 / 待复核 */
+    introState(segment: Segment, hallId: string, languageId: string): IntroState {
+      const ref = segment.introRef
+      if (!ref) return 'none'
+      const hallIntro = this.findHallIntro(hallId, ref.languageId || languageId)
+      if (!hallIntro) return 'missing'
+      return ref.pending ? 'pending' : 'synced'
+    },
+    /** 段落最终文字：导语（待复核时仍为旧导语）+ 本展项补写 */
+    paragraphOf(segment: Segment, languageId: string): string {
+      if (!segment.introRef) return segment.content
+      const own = segment.content.trim()
+      return [segment.introRef.syncedContent, own].filter(Boolean).join('\n')
+    },
+    /** 某展厅某语言下所有引用段落 */
+    introUsages(hallId: string, languageId: string): IntroUsage[] {
+      const usages: IntroUsage[] = []
+      for (const exhibit of this.exhibits.filter(item => item.hallId === hallId)) {
+        for (const draft of exhibit.drafts.filter(item => item.languageId === languageId)) {
+          for (const segment of draft.segments) {
+            if (segment.introRef) usages.push({ exhibit, draft, segment })
+          }
+        }
+      }
+      return usages
+    },
+    pendingUsages(hallId: string, languageId: string): IntroUsage[] {
+      return this.introUsages(hallId, languageId).filter(item => this.introState(item.segment, hallId, languageId) === 'pending')
+    },
+    pendingCountForExhibit(exhibitId: string): number {
+      const exhibit = this.exhibits.find(item => item.id === exhibitId)
+      if (!exhibit) return 0
+      let count = 0
+      for (const draft of exhibit.drafts) {
+        for (const segment of draft.segments) {
+          if (this.introState(segment, exhibit.hallId, draft.languageId) === 'pending') count++
+        }
+      }
+      return count
+    },
+    // ---- 文稿与段落 ----
     updateDraft(patch: Partial<Pick<LanguageDraft, 'title' | 'narration' | 'accessibility' | 'durationMinutes' | 'sources'>>) {
       const draft = this.selectedDraft
       if (!draft) return
@@ -228,7 +427,7 @@ export const useScriptStore = defineStore('museum-script', {
       const segment = this.selectedDraft?.segments.find(item => item.id === id)
       if (!segment) return
       this.commit(() => { segment.locked = !segment.locked })
-      this.notice = segment.locked ? '段落已锁定，避免误改。' : '段落已解锁。'
+      this.notice = segment.locked ? '段落已锁定，导语复核操作也会暂停。' : '段落已解锁。'
     },
     addSegment() {
       const draft = this.selectedDraft
